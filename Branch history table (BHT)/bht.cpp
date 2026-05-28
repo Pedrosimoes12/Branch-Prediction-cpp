@@ -1,19 +1,34 @@
 #include <iostream>
 #include <vector>
 #include <queue>
-#include <cstdint>
 #include <cstdlib>
 #include <ctime>
+#include <cstdint>
+#include <cstring>
 
-#define HISTORY_BITS 10
-#define PHT_SIZE (1 << HISTORY_BITS)
-int printed = 0;
+#define TABLE_SIZE 1024
 
 using Counter = uint8_t;
 
-// Contador saturante
 
-void update_counter(Counter* c, int taken) {
+// BHT Predictor (Bimodal)
+
+// 00 -> Forte N
+// 01 -> Fraco N
+// 10 -> Fraco T
+// 11 -> Forte T
+
+Counter BHT[TABLE_SIZE];
+
+int printed = 0;
+
+int acertos = 0;
+int total = 0;
+
+// Atualiza contador saturante
+
+void update_counter(Counter* c,
+                    int taken) {
 
     if(taken) {
 
@@ -27,87 +42,91 @@ void update_counter(Counter* c, int taken) {
     }
 }
 
+// Predição
+
 int predict_taken(Counter c) {
+
     return c >= 2;
 }
 
-// Two-Level Predictor
-
-uint32_t BHR = 0;
-
-Counter PHT[PHT_SIZE];
+// Inicializa predictor
 
 void init_predictor() {
 
-    for(int i = 0;
-        i < PHT_SIZE;
-        i++) {
-
-        PHT[i] = 2;
-    }
-
-    BHR = 0;
+    memset(BHT, 2,
+           sizeof(BHT));
 }
 
-int two_level_predict() {
+// Predição BHT
 
-    return predict_taken(PHT[BHR]);
+int bht_predict(uint32_t pc) {
+
+    uint32_t index =
+        pc % TABLE_SIZE;
+
+    return predict_taken(
+        BHT[index]
+    );
 }
 
-void train_predictor(int outcome) {
+// Treina predictor
+
+void train_predictor(uint32_t pc,
+                     int outcome) {
+
+    uint32_t index =
+        pc % TABLE_SIZE;
 
     update_counter(
-        &PHT[BHR],
+        &BHT[index],
         outcome
     );
-
-    BHR =
-        ((BHR << 1) | outcome)
-        & (PHT_SIZE - 1);
 }
-
-// Estrutura de Grafo
-
-struct Node {
-
-    std::vector<int> edges;
-};
-
-std::vector<Node> graph;
-
-// Estatísticas
-
-int acertos = 0;
-int total = 0;
 
 // Processa branch
 
-void process_branch(int outcome) {
+void process_branch(uint32_t pc,
+                    int outcome) {
 
     int pred =
-        two_level_predict();
+        bht_predict(pc);
 
     if(pred == outcome)
         acertos++;
 
     total++;
 
-    train_predictor(outcome);
+    train_predictor(pc, outcome);
 
     if(printed < 600) {
+
         std::cout
-            << "BHR: "
-            << BHR
-            << " | Real: "
+            << "Real: "
             << outcome
             << " | Pred: "
             << pred
+            << " | Counter: "
+            << (int)BHT[
+                pc % TABLE_SIZE
+            ]
             << std::endl;
-            printed++;
-    }    
+
+        printed++;
+    }
 }
 
-// BFS inspirado em SPEC CPU
+// Mini SPEC-like workload
+
+struct Node {
+
+    int value;
+
+    std::vector<int> edges;
+};
+
+std::vector<Node> graph;
+
+// BFS estilo SPEC
 
 void bfs(int start) {
 
@@ -121,20 +140,21 @@ void bfs(int start) {
 
     visited[start] = 1;
 
+    uint32_t pc = 0x400;
+
     while(!q.empty()) {
 
         int u = q.front();
 
         q.pop();
 
-        // Percorre vizinhos
         for(int v : graph[u].edges) {
 
-            // Branch altamente irregular
+            // Branch imprevisível
             int outcome =
                 (!visited[v]);
 
-            process_branch(outcome);
+            process_branch(pc, outcome);
 
             if(outcome) {
 
@@ -156,14 +176,17 @@ int main() {
 
     graph.resize(N);
 
-    // Gera grafo aleatório
+    // Grafo aleatório
     for(int i = 0; i < N; i++) {
 
-        int connections =
-            rand() % 12;
+        graph[i].value =
+            rand() % 1000;
+
+        int edges =
+            rand() % 10;
 
         for(int j = 0;
-            j < connections;
+            j < edges;
             j++) {
 
             int to =
@@ -175,7 +198,7 @@ int main() {
         }
     }
 
-    // Executa múltiplas BFS
+    // Executa várias BFS
     for(int i = 0;
         i < 100;
         i++) {
@@ -187,7 +210,7 @@ int main() {
         << "\n=====================\n";
 
     std::cout
-        << "Total de Branches: "
+        << "Branches: "
         << total
         << std::endl;
 
